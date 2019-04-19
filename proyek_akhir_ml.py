@@ -1,6 +1,7 @@
 import sys
 import cv2
 import os
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,12 +14,13 @@ from keras.models import Sequential, Model
 from keras.optimizers import Adam
 
 class GAN():
-    def __init__(self):
+    def __init__(self, deep_convolutional):
         self.img_rows = 128
         self.img_cols = 128
         self.channels = 3
         self.img_shape = (self.img_rows, self.img_cols, self.channels)
         self.latent_dim = 100
+        self.deep_convolutional = deep_convolutional
 
         optimizer = Adam(0.0002, 0.5)
 
@@ -51,17 +53,31 @@ class GAN():
 
         model = Sequential()
 
-        model.add(Dense(256, input_dim=self.latent_dim))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(512))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(1024))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(np.prod(self.img_shape), activation='tanh'))
-        model.add(Reshape(self.img_shape))
+        if self.deep_convolutional:
+          model.add(Dense(128 * 32 * 32, activation="relu", input_dim=self.latent_dim))
+          model.add(Reshape((32, 32, 128)))
+          model.add(UpSampling2D())
+          model.add(Conv2D(128, kernel_size=3, padding="same"))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(Activation("relu"))
+          model.add(UpSampling2D())
+          model.add(Conv2D(64, kernel_size=3, padding="same"))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(Activation("relu"))
+          model.add(Conv2D(self.channels, kernel_size=3, padding="same"))
+          model.add(Activation("tanh"))
+        else:
+          model.add(Dense(256, input_dim=self.latent_dim))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(Dense(512))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(Dense(1024))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(Dense(np.prod(self.img_shape), activation='tanh'))
+          model.add(Reshape(self.img_shape))
 
         model.summary()
 
@@ -74,12 +90,33 @@ class GAN():
 
         model = Sequential()
 
-        model.add(Flatten(input_shape=self.img_shape))
-        model.add(Dense(512))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(256))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(1, activation='sigmoid'))
+        if self.deep_convolutional:
+          model.add(Conv2D(32, kernel_size=3, strides=2, input_shape=self.img_shape, padding="same"))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dropout(0.25))
+          model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
+          model.add(ZeroPadding2D(padding=((0,1),(0,1))))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dropout(0.25))
+          model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dropout(0.25))
+          model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
+          model.add(BatchNormalization(momentum=0.8))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dropout(0.25))
+          model.add(Flatten())
+          model.add(Dense(1, activation='sigmoid'))
+        else:
+          model.add(Flatten(input_shape=self.img_shape))
+          model.add(Dense(512))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dense(256))
+          model.add(LeakyReLU(alpha=0.2))
+          model.add(Dense(1, activation='sigmoid'))
+          
         model.summary()
 
         img = Input(shape=self.img_shape)
@@ -96,8 +133,11 @@ class GAN():
         file_names = os.listdir(DATASET_FOLDER)
         for file_name in file_names:
             image = cv2.imread(DATASET_FOLDER + "/" + file_name)
-            image = cv2.resize(image, SHAPE)
-            dataset.append(image)
+            try:
+              image = cv2.resize(image, SHAPE)
+              dataset.append(image)
+            except:
+              print(file_name)  
 
         return np.array(dataset)
 
@@ -165,8 +205,20 @@ class GAN():
                 axs[i,j].imshow(gen_imgs[cnt, :,:,:])
                 axs[i,j].axis('off')
                 cnt += 1
-        fig.savefig("result/%d.png" % epoch)
+        if self.deep_convolutional:
+          fig.savefig("result/deep_convolutional_%d.png" % epoch)
+        else:
+          fig.savefig("result/%d.png" % epoch)
         plt.close()
 
-gan = GAN()
+start = time.time()
+gan = GAN(deep_convolutional=False)
 gan.train(epochs=4500, batch_size=32, sample_interval=200)
+end = time.time()
+print("Elapsed time: %d second" % (end - start))
+
+start = time.time()
+gan = GAN(deep_convolutional=True)
+gan.train(epochs=4500, batch_size=32, sample_interval=200)
+end = time.time()
+print("Elapsed time: %d second" % (end - start))
